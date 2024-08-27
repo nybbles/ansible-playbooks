@@ -1,0 +1,327 @@
+- name: Update OS packages
+  hosts: all
+  tasks:
+    - name: Update apt cache and upgrade all apt packages
+      become: true
+      apt:
+        upgrade: true
+        update_cache: true
+        cache_valid_time: 3600
+
+- name: Perform basic setup
+  hosts: all
+  tasks:
+    - name: Install commonly-needed utilities and packages
+      become: true
+      apt:
+        pkg:
+          - build-essential
+          - curl
+          - git
+          - zsh
+          - htop
+          - gh
+          - docker
+          - tmux
+          - virtualbox
+          - libfuse2
+          - pipx
+          - bzip2
+          - libbz2-dev
+          - libncurses-dev
+          - libffi-dev
+          - libreadline-dev
+          - openssl
+          - libssl-dev
+          - libsqlite3-dev
+          - liblzma-dev
+          - flatpak
+          - gnome-software-plugin-flatpak
+          - ripgrep
+    - name: Install utilities and packages
+      become: true
+      community.general.snap:
+        name:
+          - slack
+    - name: Set zsh to default shell
+      become: true
+      shell: "chsh -s $(which zsh) {{ ansible_user_id }}"
+    - name: Install ohmyzsh
+      shell: |
+        rm -rf $HOME/.oh-my-zsh
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+      args:
+        creates: $HOME/.oh-my-zsh
+    - name: Install Rustup
+      shell: |
+        curl https://sh.rustup.rs -sSf | sh -s -- -y
+        rustup override set stable
+        rustup update stable
+    - name: Create directory for locally-built binaries
+      file:
+        path: $HOME/.local/bin
+        state: directory
+        mode: "0755"
+    - name: Add directories to $PATH
+      lineinfile:
+        path: $HOME/.zshrc
+        line: export PATH=$HOME/.local/bin:$HOME/.config/tmux/plugins/tmuxifier/bin:$PATH
+    - name: Install gdu
+      shell: |
+        curl -L https://github.com/dundee/gdu/releases/latest/download/gdu_linux_amd64.tgz | tar xz
+        chmod +x gdu_linux_amd64
+        mv gdu_linux_amd64 gdu
+      args:
+        chdir: $HOME/.local/bin
+    - name: Install lazygit
+      become: true
+      shell: |
+        LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
+        tar xf lazygit.tar.gz lazygit
+        sudo install lazygit /usr/local/bin
+        rm lazygit.tar.gz
+    - name: Clone .config
+      git:
+        repo: https://github.com/nybbles/dot-config.git
+        dest: $HOME/.config
+        update: false
+    - name: Add flatpak repository
+      become: true
+      shell: flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+- name: Set up fzf
+  hosts: all
+  tasks:
+    - name: Clone fzf repo
+      git:
+        repo: https://github.com/junegunn/fzf.git
+        dest: $HOME/.fzf
+        depth: 1
+    - name: Install and set up fzf
+      shell: $HOME/.fzf/install --all
+
+- name: Set up 0xproto nerd font
+  hosts: all
+  tasks:
+    - name: Create fonts directory
+      file:
+        path: $HOME/.fonts
+        state: directory
+    - name: Download 0xproto nerd font and rebuild font cache
+      shell: |
+        curl -LO https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/0xProto.zip
+        unzip 0xProto.zip
+        rm  0xProto.zip
+        fc-cache -fv
+      args:
+        chdir: $HOME/.fonts
+
+- name: Set up tpm (tmux plugin manager)
+  hosts: all
+  tasks:
+    - name: Clone tpm
+      git:
+        repo: https://github.com/tmux-plugins/tpm.git
+        dest: ~/.config/tmux/plugins/tpm
+
+    - name: Set tmuxifier layout path
+      lineinfile:
+        path: $HOME/.zshrc
+        line: export TMUXIFIER_LAYOUT_PATH="$HOME/.config/tmux/layouts"
+
+    - name: Add tmuxifier setup to zshrc
+      lineinfile:
+        path: $HOME/.zshrc
+        line: eval "$(tmuxifier init -)"
+
+- name: Set up vagrant
+  hosts: all
+  tasks:
+    - name: Add hashicorp apt repository
+      become: true
+      shell: |
+        wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+    - name: Update hasihcorp apt repository and install vagrant
+      become: true
+      apt:
+        update_cache: yes
+        pkg:
+          - vagrant
+
+- name: Set up code directory and git stuff
+  hosts: all
+  tasks:
+    - name: Create code directory
+      file:
+        path: $HOME/code
+        state: directory
+    - name: Install gh cli plugins
+      ignore_errors: true
+      shell: |
+        gh extension install HaywardMorihara/gh-tidy
+        gh extension install mislav/gh-branch
+        gh extension install dlvhdr/gh-dash
+
+- name: Install zoxide
+  hosts: all
+  tasks:
+    - name: Install zoxide
+      shell: curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
+    - name: Add zoxide initialization to zsh
+      lineinfile:
+        path: $HOME/.zshrc
+        line: 'eval "$(zoxide init zsh)"'
+
+- name: Install neovim
+  hosts: all
+  tasks:
+    - name: Install neovim
+      shell: |
+        curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
+        chmod u+x nvim.appimage
+        ln -s nvim.appimage nvim
+      args:
+        chdir: $HOME/.local/bin
+        creates: $HOME/.local/bin/nvim
+    - name: Make nvim $EDITOR
+      lineinfile:
+        path: $HOME/.zshrc
+        line: export EDITOR=`which nvim`
+
+- name: Install nvm and node
+  hosts: all
+  tasks:
+    - name: Install nvm
+      shell: |
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
+      args:
+        creates: $HOME/.nvm
+    - name: Install node
+      shell: |
+        source $HOME/.zshrc
+        nvm install node
+      args:
+        executable: /usr/bin/zsh
+
+- name: Install Python stuff
+  hosts: all
+  tasks:
+    - name: Install Pyenv
+      shell: curl https://pyenv.run | bash
+      args:
+        creates: $HOME/.pyenv
+    - name: Setup shell for Pyenv
+      blockinfile:
+        path: $HOME/.zshrc
+        block: |
+          export PYENV_ROOT="$HOME/.pyenv"
+          [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH" 
+          eval "$(pyenv init -)"
+    - name: Install Python 3.11
+      shell: |
+        source ~/.zshrc
+        pyenv install 3.11
+      args:
+        executable: /usr/bin/zsh
+        creates: $HOME/.pyenv/versions/3.11.9
+    - name: Set Python 3.11 as global default
+      shell: pyenv global 3.11
+
+- name: Install Alacritty
+  hosts: all
+  tasks:
+    - name: Install Alacritty dependencies
+      become: true
+      apt:
+        pkg:
+          - cmake
+          - pkg-config
+          - libfreetype6-dev
+          - libfontconfig1-dev
+          - libxcb-xfixes0-dev
+          - libxkbcommon-dev
+          - python3
+    - name: Create source directory for Alacritty
+      file:
+        path: $HOME/code/alacritty
+        state: directory
+      register: alacritty_source_dir
+    - name: Check out Alacritty source
+      git:
+        repo: https://github.com/alacritty/alacritty.git
+        dest: "{{ alacritty_source_dir.path }}"
+    - name: Build Alacritty
+      shell: cargo build --release
+      args:
+        chdir: "{{ alacritty_source_dir.path }}"
+    - name: Copy Alacritty executable to final destination
+      become: true
+      copy:
+        src: "{{ alacritty_source_dir.path }}/target/release/alacritty"
+        dest: /usr/local/bin/alacritty
+        mode: "0755"
+    - name: Install Alacritty terminfo
+      become: true
+      shell: tic -xe alacritty,alacritty-direct extra/alacritty.info
+      args:
+        chdir: "{{ alacritty_source_dir.path }}"
+    - name: Install Alacritty desktop entry
+      become: true
+      shell: |
+        cp extra/logo/alacritty-term.svg /usr/share/pixmaps/Alacritty.svg
+        desktop-file-install extra/linux/Alacritty.desktop
+        update-desktop-database
+      args:
+        chdir: "{{ alacritty_source_dir.path }}"
+    - name: Clean-up source directory for Alacritty
+      file:
+        path: "{{ alacritty_source_dir.path }}"
+        state: absent
+    - name: Set Alacritty as default terminal in Gnome
+      become: true
+      shell: |
+        update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator $(which alacritty) 50
+        update-alternatives --config x-terminal-emulator
+
+- name: Install ohmyposh
+  hosts: all
+  tasks:
+    - name: Download and install ohmyposh
+      shell: curl -s https://ohmyposh.dev/install.sh | bash -s -- -d $HOME/.local/bin
+    - name: Enable ohmyposh
+      lineinfile:
+        path: $HOME/.zshrc
+        line: eval "$(oh-my-posh init zsh --config ~/.config/ohmyposh/night-owl.omp.json)"
+
+- name: Set up Syncthing
+  hosts: all
+  tasks:
+    - name: Add release PGP keys
+      become: true
+      shell: |
+        mkdir -p /etc/apt/keyrings
+        curl -L -o /etc/apt/keyrings/syncthing-archive-keyring.gpg https://syncthing.net/release-key.gpg
+    - name: Update apt and install Syncthing
+      become: true
+      apt:
+        update_cache: true
+        pkg:
+          - syncthing
+
+- name: Set up sound
+  hosts: all
+  tasks:
+    - name: Install wireplumber and other audio stuff
+      become: true
+      apt:
+        pkg:
+          # Bluetooth-related packages
+          - pulseaudio-module-bluetooth
+    - name: Enable and start wireplumber service
+      become: true
+      shell: |
+        killall pulseaudio
+        pulseaudio --start
+        systemctl restart bluetooth
